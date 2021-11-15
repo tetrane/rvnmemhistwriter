@@ -42,7 +42,8 @@ target_include_directories(rvnmemhistwriter PUBLIC
 target_link_libraries(rvnmemhistwriter
   PUBLIC
     rvnsqlite
-    rvnmetadata
+    rvnmetadata::common
+    rvnmetadata::sql
 )
 
 set(PUBLIC_HEADERS

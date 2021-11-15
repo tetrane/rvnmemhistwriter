@@ -5,7 +5,8 @@
 #include <sstream>
 #include <iostream>
 
-#include <rvnmetadata/metadata.h>
+#include <rvnmetadata/metadata-common.h>
+#include <rvnmetadata/metadata-sql.h>
 
 #include "slice.h"
 
@@ -169,7 +170,7 @@ DbWriter::DbWriter(const char* filename, const char* tool_name, const char* tool
 		tool_info + std::string(" - using rvnmemhistwriter ") + writer_version
 	);
 
-	auto rdb = RDb::create(filename, md.to_sqlite_raw_metadata());
+	auto rdb = RDb::create(filename, metadata::to_sqlite_raw_metadata(md));
 	create_sqlite_db(rdb);
 	return rdb;
 }()),
