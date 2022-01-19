@@ -31,6 +31,7 @@ struct MemoryAccess {
 class SliceBuilder;
 struct ChunkAccess;
 struct AccessInfo;
+struct ChunkWithDescription;
 
 class DbWriter {
 public:
@@ -76,6 +77,8 @@ private:
 	std::unique_ptr<SliceBuilder> write_slice_builder_;
 
 	std::vector<AccessInfo> current_access_list_;
+	// scratch-space for reuse without allocation during chunk insertion
+	std::vector<ChunkWithDescription> chunk_list_;
 };
 
 }}}} // namespace reven::backend::memaccess::db

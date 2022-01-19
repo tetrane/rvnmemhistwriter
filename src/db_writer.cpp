@@ -29,6 +29,11 @@ struct AccessInfo {
 	std::uint8_t operation; // Operation as is supposed to be inserted in the database.
 };
 
+struct ChunkWithDescription {
+	std::uint8_t operation;
+	const Chunk* chunk;
+};
+
 namespace {
 
 using ChunkAccessToRowId = std::unordered_map<const ChunkAccess*, std::uint64_t>;
@@ -94,15 +99,13 @@ std::uint64_t insert_slice(Db& db, Stmt& stmt, const Slice& read_slice, const Sl
 }
 
 // Will insert chunks from both slices in the database and return a map of ChunkAccess -> corresponding chunk rowid
+//
+// chunk_list is used as scratch pad to store chunks. It is cleared by this function, its contents after this function
+// is unspecified.
 ChunkAccessToRowId insert_chunks(Db& db, Stmt& stmt, const Slice& read_slice, const Slice& write_slice,
-	                             std::uint64_t slice_id)
+	                             std::uint64_t slice_id, std::vector<ChunkWithDescription>& chunk_list)
 {
-	struct ChunkWithDescription {
-		std::uint8_t operation;
-		const Chunk* chunk;
-	};
-
-	std::vector<ChunkWithDescription> chunk_list;
+	chunk_list.clear();
 	ChunkAccessToRowId access_to_chunk_id;
 
 	for (const auto& it : read_slice) {
@@ -244,7 +247,7 @@ void DbWriter::insert_slices()
 
 	std::uint64_t slice_id = insert_slice(db_, insert_slice_stmt_, read_slice, write_slice);
 
-	auto access_to_chunk_id = insert_chunks(db_, insert_chunk_stmt_, read_slice, write_slice, slice_id);
+	auto access_to_chunk_id = insert_chunks(db_, insert_chunk_stmt_, read_slice, write_slice, slice_id, chunk_list_);
 
 	insert_accesses(insert_access_stmt_, current_access_list_, access_to_chunk_id);
 
