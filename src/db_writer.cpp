@@ -217,6 +217,9 @@ void DbWriter::create_slices()
 	std::size_t overlap_limit = 100000; // reasonable access time
 	std::size_t touch_limit = 1000;
 	std::size_t access_count_limit = 10000000; // ~3Go ram while building
+	std::size_t chunk_count_reserve = 10000000; // Allow for 1M accesses in a slice, while costing only 160MB
+
+	chunk_list_.reserve(chunk_count_reserve);
 
 	read_slice_builder_ = std::make_unique<SliceBuilder>();
 	read_slice_builder_->chunk_size_overlap_limit(overlap_limit)
