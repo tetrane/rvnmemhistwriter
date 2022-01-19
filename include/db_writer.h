@@ -59,7 +59,7 @@ public:
 	sqlite::ResourceDatabase take() &&;
 
 private:
-	// Instanciate the slice builders.
+	// Instantiate the slice builders.
 	// Note: `read_slice_builder_` and `write_slice_builder_` pointers are valid after calling this method.
 	void create_slices();
 
