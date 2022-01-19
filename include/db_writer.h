@@ -1,6 +1,7 @@
 #pragma once
 
 #include <vector>
+#include <unordered_map>
 #include <memory>
 #include <rvnsqlite/resource_database.h>
 
@@ -32,6 +33,7 @@ class SliceBuilder;
 struct ChunkAccess;
 struct AccessInfo;
 struct ChunkWithDescription;
+class Slice;
 
 class DbWriter {
 public:
@@ -67,6 +69,14 @@ private:
 	// Note: `read_slice_builder_` and `write_slice_builder_` pointers are not valid after calling this method.
 	void insert_slices();
 
+	using ChunkAccessToRowId = std::unordered_map<const ChunkAccess*, std::uint64_t>;
+
+	// Will insert chunks from both slices in the database and return a map of ChunkAccess -> corresponding chunk rowid
+	void insert_chunks(const Slice& read_slice, const Slice& write_slice, std::uint64_t slice_id);
+
+	// Will insert chunks from both slices in the database and return a map of ChunkAccess -> corresponding chunk rowid
+	void insert_accesses();
+
 	sqlite::ResourceDatabase db_;
 	sqlite::Statement insert_slice_stmt_;
 	sqlite::Statement insert_chunk_stmt_;
@@ -79,6 +89,8 @@ private:
 	std::vector<AccessInfo> current_access_list_;
 	// scratch-space for reuse without allocation during chunk insertion
 	std::vector<ChunkWithDescription> chunk_list_;
+	// The map between the chunk accesses and their ID, this is cleaned at each insert_slices() call
+	ChunkAccessToRowId access_to_chunk_id_;
 };
 
 }}}} // namespace reven::backend::memaccess::db

@@ -1,6 +1,5 @@
 #include "db_writer.h"
 
-#include <unordered_map>
 #include <algorithm>
 #include <sstream>
 #include <iostream>
@@ -36,7 +35,6 @@ struct ChunkWithDescription {
 
 namespace {
 
-using ChunkAccessToRowId = std::unordered_map<const ChunkAccess*, std::uint64_t>;
 using Db = sqlite::Database;
 using RDb = sqlite::ResourceDatabase;
 using Stmt = sqlite::Statement;
@@ -98,70 +96,67 @@ std::uint64_t insert_slice(Db& db, Stmt& stmt, const Slice& read_slice, const Sl
 	return static_cast<std::uint64_t>(db.last_insert_rowid());
 }
 
-// Will insert chunks from both slices in the database and return a map of ChunkAccess -> corresponding chunk rowid
-//
-// chunk_list is used as scratch pad to store chunks. It is cleared by this function, its contents after this function
-// is unspecified.
-ChunkAccessToRowId insert_chunks(Db& db, Stmt& stmt, const Slice& read_slice, const Slice& write_slice,
-	                             std::uint64_t slice_id, std::vector<ChunkWithDescription>& chunk_list)
-{
-	chunk_list.clear();
-	ChunkAccessToRowId access_to_chunk_id;
 
-	for (const auto& it : read_slice) {
-		chunk_list.emplace_back(ChunkWithDescription{ static_cast<std::uint8_t>(Operation::Read), &it.second });
-	}
-	for (const auto& it : write_slice) {
-		chunk_list.emplace_back(ChunkWithDescription{ static_cast<std::uint8_t>(Operation::Write), &it.second });
-	}
+} // anonymous namespace
 
-	// Let's ease sqlite's job and ensure chunks are naturally sorted by ascending address
-	std::sort(chunk_list.begin(), chunk_list.end(), [](const ChunkWithDescription& a, const ChunkWithDescription& b) {
-		return a.chunk->address_first() > b.chunk->address_first();
-	});
 
-	for (const auto& it : chunk_list) {
-		stmt.bind_arg_throw(1, slice_id, "slice_id");
-		stmt.bind_arg_throw(2, it.chunk->address_first(), "phy_first");
-		stmt.bind_arg_throw(3, it.chunk->address_last(), "phy_last");
-		stmt.bind_arg_extend(4, it.operation, "operation");
-		stmt.step();
-		stmt.reset();
-
-		std::uint64_t chunk_id = static_cast<std::uint64_t>(db.last_insert_rowid());
-		for (auto a = it.chunk->accesses(); a; a = a->next()) {
-			access_to_chunk_id.emplace(a, chunk_id);
-		}
-	}
-
-	return access_to_chunk_id;
-}
 
 // Will insert chunks from both slices in the database and return a map of ChunkAccess -> corresponding chunk rowid
-void insert_accesses(Stmt& stmt, const std::vector<AccessInfo>& current_access_list,
-	            const ChunkAccessToRowId& access_to_chunk_id)
+void DbWriter::insert_accesses()
 {
-	for (const auto& access: current_access_list) {
-		auto chunk_id_it = access_to_chunk_id.find(access.chunk_access);
-		if (chunk_id_it == access_to_chunk_id.end()) {
+	for (const auto& access: current_access_list_) {
+		auto chunk_id_it = access_to_chunk_id_.find(access.chunk_access);
+		if (chunk_id_it == access_to_chunk_id_.end()) {
 			throw std::logic_error("access_to_chunk_id object should contain all accesses, but one is missing");
 		}
 
-		stmt.bind_arg_throw(1, chunk_id_it->second, "chunk_id");
-		stmt.bind_arg_throw(2, access.chunk_access->transition, "transition");
+		insert_access_stmt_.bind_arg_throw(1, chunk_id_it->second, "chunk_id");
+		insert_access_stmt_.bind_arg_throw(2, access.chunk_access->transition, "transition");
 		if (access.has_virtual_address)
-			stmt.bind_arg_cast(3, access.virtual_address, "linear");
+			insert_access_stmt_.bind_arg_cast(3, access.virtual_address, "linear");
 		else
-			stmt.bind_null(3, "linear");
-		stmt.bind_arg_throw(4, access.chunk_access->address, "phy_first");
-		stmt.bind_arg_throw(5, access.chunk_access->size, "size");
-		stmt.bind_arg_extend(6, access.operation, "operation");
-		stmt.step();
-		stmt.reset();
+			insert_access_stmt_.bind_null(3, "linear");
+		insert_access_stmt_.bind_arg_throw(4, access.chunk_access->address, "phy_first");
+		insert_access_stmt_.bind_arg_throw(5, access.chunk_access->size, "size");
+		insert_access_stmt_.bind_arg_extend(6, access.operation, "operation");
+		insert_access_stmt_.step();
+		insert_access_stmt_.reset();
 	}
 }
 
-} // anonymous namespace
+
+void DbWriter::insert_chunks(const Slice& read_slice, const Slice& write_slice, std::uint64_t slice_id)
+{
+	chunk_list_.clear();
+	access_to_chunk_id_.clear();
+
+	for (const auto& it : read_slice) {
+		chunk_list_.emplace_back(ChunkWithDescription{ static_cast<std::uint8_t>(Operation::Read), &it.second });
+	}
+	for (const auto& it : write_slice) {
+		chunk_list_.emplace_back(ChunkWithDescription{ static_cast<std::uint8_t>(Operation::Write), &it.second });
+	}
+
+	// Let's ease sqlite's job and ensure chunks are naturally sorted by ascending address
+	std::sort(chunk_list_.begin(), chunk_list_.end(), [](const ChunkWithDescription& a, const ChunkWithDescription& b) {
+		return a.chunk->address_first() > b.chunk->address_first();
+	});
+
+	for (const auto& it : chunk_list_) {
+		insert_chunk_stmt_.bind_arg_throw(1, slice_id, "slice_id");
+		insert_chunk_stmt_.bind_arg_throw(2, it.chunk->address_first(), "phy_first");
+		insert_chunk_stmt_.bind_arg_throw(3, it.chunk->address_last(), "phy_last");
+		insert_chunk_stmt_.bind_arg_extend(4, it.operation, "operation");
+		insert_chunk_stmt_.step();
+		insert_chunk_stmt_.reset();
+
+		std::uint64_t chunk_id = static_cast<std::uint64_t>(db_.last_insert_rowid());
+		for (auto a = it.chunk->accesses(); a; a = a->next()) {
+			access_to_chunk_id_.emplace(a, chunk_id);
+		}
+	}
+}
+
 
 DbWriter::DbWriter(const char* filename, const char* tool_name, const char* tool_version, const char* tool_info) :
 	db_([filename, tool_name, tool_version, tool_info]() {
@@ -247,9 +242,9 @@ void DbWriter::insert_slices()
 
 	std::uint64_t slice_id = insert_slice(db_, insert_slice_stmt_, read_slice, write_slice);
 
-	auto access_to_chunk_id = insert_chunks(db_, insert_chunk_stmt_, read_slice, write_slice, slice_id, chunk_list_);
+	insert_chunks(read_slice, write_slice, slice_id);
 
-	insert_accesses(insert_access_stmt_, current_access_list_, access_to_chunk_id);
+	insert_accesses();
 
 	db_.exec("commit", "Can't commit transaction");
 
