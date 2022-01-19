@@ -1,6 +1,6 @@
 #include "db_writer.h"
 
-#include <map>
+#include <unordered_map>
 #include <algorithm>
 #include <sstream>
 #include <iostream>
@@ -31,7 +31,7 @@ struct AccessInfo {
 
 namespace {
 
-using ChunkAccessToRowId = std::map<const ChunkAccess*, std::uint64_t>;
+using ChunkAccessToRowId = std::unordered_map<const ChunkAccess*, std::uint64_t>;
 using Db = sqlite::Database;
 using RDb = sqlite::ResourceDatabase;
 using Stmt = sqlite::Statement;
