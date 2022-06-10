@@ -114,6 +114,10 @@ public:
 	 */
 	const ChunkAccess* insert(std::uint64_t icount, std::uint64_t address, std::uint64_t size)
 	{
+		if (size == 0) {
+			throw std::invalid_argument("SliceBuilder insertion: attempted to insert access with size 0");
+		}
+
 		if (icount > slice_.transition_last_ and stop_at_next_transition_)
 			return nullptr;
 

@@ -121,3 +121,10 @@ BOOST_AUTO_TEST_CASE(test_db_writer_slice_builder_limit_access_count_soft)
 	BOOST_CHECK(not b.insert(2, 200, 10)); // will be ignored
 	BOOST_CHECK_EQUAL(b.access_count(), 3);
 }
+
+BOOST_AUTO_TEST_CASE(test_db_writer_slice_invalid_accesses)
+{
+	SliceBuilder b;
+	BOOST_CHECK_THROW(b.insert(0, 1, 0), std::invalid_argument);
+	BOOST_CHECK_THROW(b.insert(0, 0, 0), std::invalid_argument);
+}
