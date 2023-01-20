@@ -1,0 +1,215 @@
+image: debian:stable
+
+stages:
+    - setup:1
+    - setup:2
+    - build
+    - test
+    - coverage
+    - deploy
+
+
+variables:
+    RVNBINRESOURCE_COMMIT: 019ba2f29e24e5e559e81efd6121397abd850cc2
+    RVNSQLITE_COMMIT: bb34a68f8198bfea15283da5feb5df67422d26d2
+    RVNJSONRESOURCE_COMMIT: 57e0d5ca3697da1ab4dae968bd96c1cd995b99df
+    RVNMETADATA_COMMIT: 3c888dee8371e73b046dbb958af7cb3b479ea82c
+
+
+.build_dependency:
+    script:
+        - if [[ -d $DEPENDENCY_NAME ]]; then echo "Already built"; exit 0; fi
+        - apt-get update && apt-get install -y git $DEPENDENCY_DEPENDENCIES
+        - base_url=$(dirname $(git remote get-url origin))
+        - mkdir $DEPENDENCY_NAME
+        - cd /tmp
+        - export GIT_SSL_CAINFO="$CI_SERVER_TLS_CA_FILE"
+        - git clone $base_url/$DEPENDENCY_NAME.git
+        - cd $DEPENDENCY_NAME
+        - git fetch origin $DEPENDENCY_COMMIT
+        - git checkout $DEPENDENCY_COMMIT
+        - mkdir build
+        - cd build
+        - cmake -DCMAKE_INSTALL_PREFIX=$CI_PROJECT_DIR/$DEPENDENCY_NAME
+                $DEPENDENCY_CMAKE_EXTRA_ARGS ..
+        - make
+        - make install
+
+    cache:
+        key: $DEPENDENCY_NAME-$DEPENDENCY_COMMIT
+        paths:
+            - $DEPENDENCY_NAME/
+
+    artifacts:
+        paths:
+            - $DEPENDENCY_NAME/
+
+prepare:rvnbinresource:
+    stage: setup:1
+
+    extends: .build_dependency
+
+    variables:
+        DEPENDENCY_NAME: rvnbinresource
+        DEPENDENCY_COMMIT: $RVNBINRESOURCE_COMMIT
+        DEPENDENCY_DEPENDENCIES: "cmake g++ libboost-test-dev libboost-filesystem-dev"
+
+prepare:rvnjsonresource:
+    stage: setup:1
+
+    extends: .build_dependency
+
+    variables:
+        DEPENDENCY_NAME: rvnjsonresource
+        DEPENDENCY_COMMIT: $RVNJSONRESOURCE_COMMIT
+        DEPENDENCY_DEPENDENCIES: "cmake g++ libboost-test-dev libboost-filesystem-dev"
+
+prepare:rvnsqlite:
+    stage: setup:1
+
+    extends: .build_dependency
+
+    variables:
+        DEPENDENCY_NAME: rvnsqlite
+        DEPENDENCY_COMMIT: $RVNSQLITE_COMMIT
+        DEPENDENCY_DEPENDENCIES: "cmake g++ libboost-test-dev libsqlite3-dev"
+
+prepare:rvnmetadata:
+    stage: setup:2
+
+    extends: .build_dependency
+
+    dependencies:
+        - prepare:rvnsqlite
+        - prepare:rvnbinresource
+        - prepare:rvnjsonresource
+
+    variables:
+        DEPENDENCY_NAME: rvnmetadata
+        DEPENDENCY_COMMIT: $RVNMETADATA_COMMIT
+        DEPENDENCY_DEPENDENCIES: "cmake g++ libboost-test-dev libboost-filesystem-dev libboost-program-options-dev libmagic-dev libsqlite3-dev"
+        DEPENDENCY_CMAKE_EXTRA_ARGS: |
+                -Drvnbinresource_DIR=$CI_PROJECT_DIR/rvnbinresource/share/cmake/rvnbinresource
+                -Drvnsqlite_DIR=$CI_PROJECT_DIR/rvnsqlite/share/cmake/rvnsqlite
+                -Drvnjsonresource_DIR=$CI_PROJECT_DIR/rvnjsonresource/share/cmake/rvnjsonresource
+                -Dsqlite3_DIR=$CI_PROJECT_DIR/rvnsqlite/share/cmake/sqlite3
+
+
+.build:
+    stage: build
+
+    dependencies:
+        - prepare:rvnsqlite
+        - prepare:rvnbinresource
+        - prepare:rvnjsonresource
+        - prepare:rvnmetadata
+
+    script:
+        - mkdir build
+        - cd build
+        - cmake -DCMAKE_C_COMPILER=$CMAKE_C_COMPILER -DCMAKE_CXX_COMPILER=$CMAKE_CXX_COMPILER
+                -DBUILD_TEST_COVERAGE=$BUILD_TEST_COVERAGE
+                -Drvnbinresource_DIR=$CI_PROJECT_DIR/rvnbinresource/share/cmake/rvnbinresource
+                -Drvnjsonresource_DIR=$CI_PROJECT_DIR/rvnjsonresource/share/cmake/rvnjsonresource
+                -Drvnmetadata_DIR=$CI_PROJECT_DIR/rvnmetadata/share/cmake/rvnmetadata
+                -Dmagic_DIR=$CI_PROJECT_DIR/rvnmetadata/share/cmake/magic
+                -Drvnsqlite_DIR=$CI_PROJECT_DIR/rvnsqlite/share/cmake/rvnsqlite
+                -Dsqlite3_DIR=$CI_PROJECT_DIR/rvnsqlite/share/cmake/sqlite3
+                ..
+        - make
+
+    artifacts:
+        paths:
+            - build/
+
+build:gcc:
+    extends: .build
+
+    before_script:
+        - apt-get update && apt-get install -y cmake g++ libboost-test-dev libboost-filesystem-dev libmagic-dev libsqlite3-dev
+
+    variables:
+        CMAKE_C_COMPILER: gcc
+        CMAKE_CXX_COMPILER: g++
+        BUILD_TEST_COVERAGE: "ON"
+
+build:clang:
+    extends: .build
+
+    before_script:
+        - apt-get update && apt-get install -y cmake clang libboost-test-dev libboost-filesystem-dev libmagic-dev libsqlite3-dev
+
+    variables:
+        CMAKE_C_COMPILER: clang
+        CMAKE_CXX_COMPILER: clang++
+        BUILD_TEST_COVERAGE: "OFF"
+
+
+.test:
+    stage: test
+
+    before_script:
+        - apt-get update && apt-get install -y cmake libboost-test-dev libboost-filesystem-dev libmagic-dev libsqlite3-dev
+
+    script:
+        - cd build/
+        - ctest --output-on-failure
+
+    artifacts:
+        paths:
+            - build
+
+test:gcc:
+    extends: .test
+
+    dependencies:
+        - build:gcc
+
+test:clang:
+    extends: .test
+
+    dependencies:
+        - build:clang
+
+
+coverage:gcc:
+    stage: coverage
+
+    before_script:
+        - apt-get update && apt-get install -y lcov
+
+    dependencies:
+        - test:gcc
+
+    script:
+        - lcov --directory build/ --capture --output-file coverage.info
+        - lcov --remove coverage.info '/usr/*' --output-file coverage.info
+        - lcov --remove coverage.info $CI_PROJECT_DIR'/rvnbinresource/*' --output-file coverage.info
+        - lcov --remove coverage.info $CI_PROJECT_DIR'/rvnsqlite/*' --output-file coverage.info
+        - lcov --remove coverage.info $CI_PROJECT_DIR'/rvnmetadata/*' --output-file coverage.info
+        - lcov --list coverage.info
+        - genhtml coverage.info -o coverage_report
+
+    coverage: "/\\s+Total:\\|(\\d+\\.\\d+)%/"
+
+    artifacts:
+        paths:
+            - coverage_report/
+
+
+pages:
+    stage: deploy
+
+    dependencies:
+        - coverage:gcc
+
+    script:
+        - mv coverage_report/ public/
+
+    artifacts:
+        paths:
+            - public
+        expire_in: 30 days
+
+    rules:
+      - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
